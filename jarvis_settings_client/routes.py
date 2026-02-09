@@ -104,6 +104,7 @@ def _default_auth_dependency() -> None:
 def create_settings_router(
     service: SettingsService,
     auth_dependency: Callable[[], Any] | None = None,
+    write_auth_dependency: Callable[[], Any] | None = None,
     prefix: str = "",
     tags: list[str] | None = None,
 ) -> APIRouter:
@@ -111,9 +112,12 @@ def create_settings_router(
 
     Args:
         service: SettingsService instance to use
-        auth_dependency: FastAPI dependency for authentication.
+        auth_dependency: FastAPI dependency for authentication on read endpoints.
             If None, uses a default that rejects all requests.
             Typically this should be your app-to-app auth dependency.
+        write_auth_dependency: FastAPI dependency for authentication on write
+            endpoints (PUT, POST). If None, falls back to auth_dependency.
+            Typically this should be a superuser JWT auth dependency.
         prefix: URL prefix for routes (default: no prefix)
         tags: OpenAPI tags for the router
 
@@ -135,6 +139,7 @@ def create_settings_router(
 
     # Use provided auth or default (which rejects all)
     auth = auth_dependency or _default_auth_dependency
+    write_auth = write_auth_dependency or auth
 
     @router.get("/", response_model=SettingsListResponse)
     def list_settings(
@@ -233,7 +238,7 @@ def create_settings_router(
         household_id: str | None = Query(None, description="Household scope"),
         node_id: str | None = Query(None, description="Node scope"),
         user_id: int | None = Query(None, description="User scope"),
-        _auth: Any = Depends(auth),
+        _auth: Any = Depends(write_auth),
     ) -> UpdateResponse:
         """Update a single setting.
 
@@ -287,7 +292,7 @@ def create_settings_router(
 
     @router.post("/sync-from-env", response_model=SyncResponse)
     def sync_from_env(
-        _auth: Any = Depends(auth),
+        _auth: Any = Depends(write_auth),
     ) -> SyncResponse:
         """One-time migration: sync settings from environment variables to database.
 
@@ -308,7 +313,7 @@ def create_settings_router(
     @router.post("/invalidate-cache", response_model=CacheInvalidateResponse)
     def invalidate_cache(
         key: str | None = Query(None, description="Key to invalidate (all if omitted)"),
-        _auth: Any = Depends(auth),
+        _auth: Any = Depends(write_auth),
     ) -> CacheInvalidateResponse:
         """Invalidate the settings cache.
 

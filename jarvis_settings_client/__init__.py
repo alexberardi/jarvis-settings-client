@@ -35,6 +35,7 @@ Usage:
     model_name = settings.get("model.name")
 """
 
+from jarvis_settings_client.auth import create_superuser_auth
 from jarvis_settings_client.types import SettingDefinition, SettingValue
 from jarvis_settings_client.service import SettingsService, coerce_value, serialize_value
 from jarvis_settings_client.routes import create_settings_router
@@ -46,5 +47,6 @@ __all__ = [
     "coerce_value",
     "serialize_value",
     "create_settings_router",
+    "create_superuser_auth",
 ]
 __version__ = "0.1.0"
