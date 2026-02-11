@@ -1,15 +1,15 @@
-"""Superuser JWT validation for settings write operations.
+"""Auth utilities for settings endpoints.
 
-Provides a factory that creates a FastAPI dependency to validate superuser JWTs
-by calling jarvis-auth's /auth/me endpoint. No shared secrets needed -- the JWT
-secret stays in jarvis-auth only.
+Provides factories that create FastAPI dependencies for:
+- Superuser JWT validation via jarvis-auth /auth/me
+- Combined auth that accepts either Bearer token OR app-to-app credentials
 """
 
 import logging
 from typing import Any, Callable
 
 import httpx
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
@@ -83,3 +83,63 @@ def create_superuser_auth(auth_service_url: str) -> Callable[..., Any]:
         }
 
     return require_superuser_jwt
+
+
+def create_combined_auth(auth_service_url: str) -> Callable[..., Any]:
+    """Create a FastAPI dependency that accepts either superuser JWT or app credentials.
+
+    Checks for a Bearer token first (validated via jarvis-auth /auth/me as superuser).
+    If no Bearer token, checks for app-to-app credentials (X-Jarvis-App-Id +
+    X-Jarvis-App-Key) validated via jarvis-auth /internal/app-ping.
+
+    Args:
+        auth_service_url: Base URL of jarvis-auth (e.g. "http://localhost:8007")
+
+    Returns:
+        A FastAPI dependency function.
+    """
+    auth_url = auth_service_url.rstrip("/")
+    superuser_dep = create_superuser_auth(auth_service_url)
+
+    async def combined_auth(
+        request: Request,
+        authorization: str | None = Header(None),
+        x_jarvis_app_id: str | None = Header(None),
+        x_jarvis_app_key: str | None = Header(None),
+    ) -> dict[str, Any]:
+        # Try Bearer token first
+        if authorization and authorization.startswith("Bearer "):
+            return superuser_dep(authorization=authorization)
+
+        # Try app-to-app credentials
+        if x_jarvis_app_id and x_jarvis_app_key:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(
+                        f"{auth_url}/internal/app-ping",
+                        headers={
+                            "X-Jarvis-App-Id": x_jarvis_app_id,
+                            "X-Jarvis-App-Key": x_jarvis_app_key,
+                        },
+                    )
+            except httpx.RequestError as exc:
+                logger.error("Failed to reach jarvis-auth for app-ping: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Unable to validate credentials: auth service unreachable",
+                ) from exc
+
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid app credentials",
+                )
+
+            return {"auth_type": "app_credentials", "app_id": x_jarvis_app_id}
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication. Provide either Bearer token or app credentials.",
+        )
+
+    return combined_auth
