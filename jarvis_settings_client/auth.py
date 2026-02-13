@@ -13,20 +13,30 @@ from fastapi import Header, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
+# Accept a static URL string or a callable that returns the URL lazily.
+AuthUrl = str | Callable[[], str]
 
-def create_superuser_auth(auth_service_url: str) -> Callable[..., Any]:
+
+def _resolve_url(auth_service_url: AuthUrl) -> str:
+    """Resolve auth URL at call time (supports lazy resolution via callable)."""
+    if callable(auth_service_url):
+        return auth_service_url().rstrip("/")
+    return auth_service_url.rstrip("/")
+
+
+def create_superuser_auth(auth_service_url: AuthUrl) -> Callable[..., Any]:
     """Create a FastAPI dependency that validates superuser JWT via jarvis-auth.
 
     Calls GET /auth/me on jarvis-auth with the Bearer token from the request.
     Checks the is_superuser field in the response.
 
     Args:
-        auth_service_url: Base URL of jarvis-auth (e.g. "http://localhost:8007")
+        auth_service_url: Base URL of jarvis-auth (e.g. "http://localhost:8007"),
+            or a callable that returns the URL (for lazy/service-discovery resolution).
 
     Returns:
         A FastAPI dependency function.
     """
-    auth_url = auth_service_url.rstrip("/")
 
     def require_superuser_jwt(
         authorization: str | None = Header(None),
@@ -38,6 +48,7 @@ def create_superuser_auth(auth_service_url: str) -> Callable[..., Any]:
             )
 
         token = authorization[7:]
+        auth_url = _resolve_url(auth_service_url)
 
         try:
             with httpx.Client(timeout=5.0) as client:
@@ -85,7 +96,7 @@ def create_superuser_auth(auth_service_url: str) -> Callable[..., Any]:
     return require_superuser_jwt
 
 
-def create_combined_auth(auth_service_url: str) -> Callable[..., Any]:
+def create_combined_auth(auth_service_url: AuthUrl) -> Callable[..., Any]:
     """Create a FastAPI dependency that accepts either superuser JWT or app credentials.
 
     Checks for a Bearer token first (validated via jarvis-auth /auth/me as superuser).
@@ -93,12 +104,12 @@ def create_combined_auth(auth_service_url: str) -> Callable[..., Any]:
     X-Jarvis-App-Key) validated via jarvis-auth /internal/app-ping.
 
     Args:
-        auth_service_url: Base URL of jarvis-auth (e.g. "http://localhost:8007")
+        auth_service_url: Base URL of jarvis-auth (e.g. "http://localhost:8007"),
+            or a callable that returns the URL (for lazy/service-discovery resolution).
 
     Returns:
         A FastAPI dependency function.
     """
-    auth_url = auth_service_url.rstrip("/")
     superuser_dep = create_superuser_auth(auth_service_url)
 
     async def combined_auth(
@@ -113,6 +124,7 @@ def create_combined_auth(auth_service_url: str) -> Callable[..., Any]:
 
         # Try app-to-app credentials
         if x_jarvis_app_id and x_jarvis_app_key:
+            auth_url = _resolve_url(auth_service_url)
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     resp = await client.get(
