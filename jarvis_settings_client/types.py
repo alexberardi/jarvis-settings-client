@@ -33,6 +33,7 @@ class SettingDefinition:
     env_fallback: str | None = None
     requires_reload: bool = False
     is_secret: bool = False
+    options: list[Any] | None = None
 
 
 @dataclass

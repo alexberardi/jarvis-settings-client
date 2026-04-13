@@ -551,6 +551,7 @@ class SettingsService:
                     "is_secret": definition.is_secret,
                     "env_fallback": definition.env_fallback,
                     "from_db": from_db,
+                    "options": definition.options,
                 }
             )
 

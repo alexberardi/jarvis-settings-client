@@ -35,6 +35,7 @@ class SettingResponse(BaseModel):
     is_secret: bool
     env_fallback: str | None = None
     from_db: bool
+    options: list[Any] | None = None
 
 
 class SettingsListResponse(BaseModel):
