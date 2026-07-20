@@ -750,3 +750,70 @@ class TestSettingsServiceThreadSafety:
 
         # This is a structural test - actual thread safety
         # would require concurrent execution tests
+
+
+class TestCascadeAgainstRealDb:
+    """Cascade tests against a real in-memory SQLite session.
+
+    The MagicMock cascade tests above cannot see a scope bug — a mocked
+    ``.first()`` returns a row no matter what the filter was. These use a real
+    session and a real model so the WHERE clauses actually run. This class
+    exists because a user-only setting (household/node NULL, user_id set) was
+    silently write-only: ``set(key, user_id=n)`` persisted it but the cascade
+    had no branch that matched it back, so ``get`` fell through to the default.
+    """
+
+    def _service(self, sample_definitions):
+        from sqlalchemy.orm import declarative_base
+        from sqlalchemy import Boolean, Column, Integer, String
+
+        Base = declarative_base()
+
+        class Setting(Base):
+            __tablename__ = "settings"
+            id = Column(Integer, primary_key=True)
+            key = Column(String, nullable=False)
+            value = Column(String)
+            value_type = Column(String)
+            category = Column(String)
+            description = Column(String)
+            requires_reload = Column(Boolean, default=False)
+            is_secret = Column(Boolean, default=False)
+            env_fallback = Column(String)
+            household_id = Column(String, nullable=True)
+            node_id = Column(String, nullable=True)
+            user_id = Column(Integer, nullable=True)
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        SessionLocal = sessionmaker(bind=engine)
+
+        from jarvis_settings_client.service import SettingsService
+
+        return SettingsService(
+            definitions=sample_definitions,
+            get_db_session=lambda: SessionLocal(),
+            setting_model=Setting,
+        )
+
+    def test_user_scoped_value_survives_the_round_trip(self, sample_definitions):
+        """The regression: write with user_id only, read it back with user_id
+        only. Before the fix this returned the definition default."""
+        service = self._service(sample_definitions)
+
+        assert service.set("model.name", "my-personal-model", user_id=42) is True
+        assert service.get("model.name", user_id=42) == "my-personal-model"
+
+    def test_a_users_value_does_not_leak_to_another_user(self, sample_definitions):
+        service = self._service(sample_definitions)
+        service.set("model.name", "alice-model", user_id=1)
+
+        assert service.get("model.name", user_id=2) == "default-model"
+
+    def test_user_value_beats_the_system_default_row(self, sample_definitions):
+        service = self._service(sample_definitions)
+        service.set("model.name", "system-wide")            # all-NULL scope
+        service.set("model.name", "just-mine", user_id=7)
+
+        assert service.get("model.name", user_id=7) == "just-mine"
+        assert service.get("model.name") == "system-wide"

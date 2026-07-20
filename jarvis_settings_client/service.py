@@ -197,6 +197,27 @@ class SettingsService:
             if setting:
                 return setting.value, setting.value_type, True
 
+        # Level 1b: User-only (a personal setting with no household/node
+        # context). set() writes such a row with household_id and node_id
+        # NULL and user_id set; without this branch that row is unreachable
+        # and get() falls straight through to the system default — user-scoped
+        # settings were effectively write-only. A user's own value takes
+        # precedence over the node/household/system defaults below, which is
+        # the point of scoping it to the user.
+        if user_id is not None:
+            setting = (
+                db.query(Setting)
+                .filter(
+                    Setting.key == key,
+                    Setting.household_id.is_(None),
+                    Setting.node_id.is_(None),
+                    Setting.user_id == user_id,
+                )
+                .first()
+            )
+            if setting:
+                return setting.value, setting.value_type, True
+
         # Level 2: Node-specific (requires household_id and node_id)
         if household_id is not None and node_id is not None:
             setting = (
