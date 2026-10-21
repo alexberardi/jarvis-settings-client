@@ -1,5 +1,10 @@
 # jarvis-settings-client
 
+> [!WARNING]
+> **Deprecated.** This library is used only by the services of the old multi-container Jarvis Automation stack, which jarvisd ([jarvis-server](https://github.com/alexberardi/jarvis-server)) replaces. New installs: [installer.jarvisautomation.io](https://installer.jarvisautomation.io). Moving an existing install: [Migrating from the Docker install](https://docs.jarvisautomation.dev/install/migrating-from-docker/).
+>
+> The old stack stays supported, with fixes only, until jarvisd v0.1.0. This repository will be archived after that; published images and packages stay available for existing installs.
+
 A shared settings library for Jarvis microservices. It stores runtime
 configuration in a database (with environment-variable fallback), provides
 thread-safe cached reads with typed getters, supports multi-tenant
